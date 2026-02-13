@@ -124,19 +124,19 @@ class WindowManager: ObservableObject {
 
     func tileAllWindows() {
         let allWindows = appWindows.flatMap { $0.windows }
-        tileWindows(allWindows)
+        tileWindows(allWindows, position: .full)
     }
 
-    func tileSelectedWindows() {
+    func tileSelectedWindows(position: TilePosition = .full) {
         let selectedWindows = appWindows
             .filter { $0.isSelected }
             .flatMap { $0.windows }
 
         guard !selectedWindows.isEmpty else { return }
-        tileWindows(selectedWindows)
+        tileWindows(selectedWindows, position: position)
     }
 
-    private func tileWindows(_ windows: [WindowInfo]) {
+    private func tileWindows(_ windows: [WindowInfo], position: TilePosition) {
         guard !windows.isEmpty else { return }
 
         // Check permissions first
@@ -145,7 +145,7 @@ class WindowManager: ObservableObject {
             return
         }
 
-        let tileRects = layoutEngine.generateTileRects(windowCount: windows.count)
+        let tileRects = layoutEngine.generateTileRects(windowCount: windows.count, position: position)
 
         for (index, window) in windows.enumerated() {
             guard index < tileRects.count else { break }

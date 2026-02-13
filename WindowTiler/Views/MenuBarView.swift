@@ -128,30 +128,56 @@ struct MenuBarView: View {
 
                     Divider()
 
-                    // Tile Selected button
-                    Button(action: {
-                        windowManager.tileSelectedWindows()
-                    }) {
+                    // Tile Selected section
+                    VStack(spacing: 8) {
                         HStack {
-                            Image(systemName: "checkmark.square.fill")
                             Text("Tile Selected")
-                            Spacer()
-                            Text("\(windowManager.selectedWindowCount)")
+                                .font(.subheadline)
                                 .foregroundColor(.secondary)
+                            Spacer()
+                            Text("\(windowManager.selectedWindowCount) windows")
                                 .font(.caption)
+                                .foregroundColor(.secondary)
                         }
                         .padding(.horizontal)
-                        .padding(.vertical, 8)
-                        .frame(maxWidth: .infinity)
-                        .background(windowManager.selectedWindowCount > 0
-                            ? Color.accentColor.opacity(0.1)
-                            : Color.clear)
-                        .cornerRadius(6)
+
+                        // Position buttons
+                        HStack(spacing: 8) {
+                            TileButton(
+                                icon: "rectangle.lefthalf.filled",
+                                label: "Left",
+                                disabled: windowManager.selectedWindowCount == 0
+                            ) {
+                                windowManager.tileSelectedWindows(position: .left)
+                            }
+
+                            TileButton(
+                                icon: "rectangle.center.inset.filled",
+                                label: "Center",
+                                disabled: windowManager.selectedWindowCount == 0
+                            ) {
+                                windowManager.tileSelectedWindows(position: .center)
+                            }
+
+                            TileButton(
+                                icon: "rectangle.righthalf.filled",
+                                label: "Right",
+                                disabled: windowManager.selectedWindowCount == 0
+                            ) {
+                                windowManager.tileSelectedWindows(position: .right)
+                            }
+
+                            TileButton(
+                                icon: "square.grid.2x2",
+                                label: "Grid",
+                                disabled: windowManager.selectedWindowCount == 0
+                            ) {
+                                windowManager.tileSelectedWindows(position: .full)
+                            }
+                        }
+                        .padding(.horizontal)
                     }
-                    .buttonStyle(.plain)
-                    .disabled(windowManager.selectedWindowCount == 0)
-                    .padding(.horizontal)
-                    .padding(.bottom, 8)
+                    .padding(.vertical, 8)
                 }
             }
 
@@ -171,6 +197,31 @@ struct MenuBarView: View {
             .background(Color(NSColor.controlBackgroundColor))
         }
         .frame(width: 300, height: 400)
+    }
+}
+
+struct TileButton: View {
+    let icon: String
+    let label: String
+    let disabled: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 4) {
+                Image(systemName: icon)
+                    .font(.title2)
+                Text(label)
+                    .font(.caption2)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 8)
+            .background(disabled ? Color.clear : Color.accentColor.opacity(0.1))
+            .cornerRadius(6)
+        }
+        .buttonStyle(.plain)
+        .disabled(disabled)
+        .opacity(disabled ? 0.4 : 1.0)
     }
 }
 

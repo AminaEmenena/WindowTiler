@@ -1,6 +1,13 @@
 import Foundation
 import AppKit
 
+enum TilePosition {
+    case full       // Full screen grid
+    case left       // Left half of screen
+    case right      // Right half of screen
+    case center     // Center 60% of screen
+}
+
 struct TileLayout {
     let rows: Int
     let columns: Int
@@ -78,5 +85,65 @@ class LayoutEngine {
         let newY = screenHeight - rect.origin.y - rect.height
 
         return CGRect(x: rect.origin.x, y: newY, width: rect.width, height: rect.height)
+    }
+
+    /// Generate tile rectangles for a specific screen position
+    func generateTileRects(windowCount: Int, position: TilePosition, padding: CGFloat = 4) -> [CGRect] {
+        guard windowCount > 0 else { return [] }
+
+        let usableArea = getUsableScreenArea()
+
+        // Calculate the target area based on position
+        let targetArea: CGRect
+        switch position {
+        case .full:
+            targetArea = usableArea
+        case .left:
+            targetArea = CGRect(
+                x: usableArea.origin.x,
+                y: usableArea.origin.y,
+                width: usableArea.width / 2,
+                height: usableArea.height
+            )
+        case .right:
+            targetArea = CGRect(
+                x: usableArea.origin.x + usableArea.width / 2,
+                y: usableArea.origin.y,
+                width: usableArea.width / 2,
+                height: usableArea.height
+            )
+        case .center:
+            let centerWidth = usableArea.width * 0.6
+            targetArea = CGRect(
+                x: usableArea.origin.x + (usableArea.width - centerWidth) / 2,
+                y: usableArea.origin.y,
+                width: centerWidth,
+                height: usableArea.height
+            )
+        }
+
+        // For side positions, stack windows vertically
+        let rows = windowCount
+        let columns = 1
+
+        let totalPaddingX = padding * CGFloat(columns + 1)
+        let totalPaddingY = padding * CGFloat(rows + 1)
+
+        let cellWidth = (targetArea.width - totalPaddingX) / CGFloat(columns)
+        let cellHeight = (targetArea.height - totalPaddingY) / CGFloat(rows)
+
+        var rects: [CGRect] = []
+
+        for i in 0..<windowCount {
+            let row = i
+            let col = 0
+
+            let x = targetArea.origin.x + padding + CGFloat(col) * (cellWidth + padding)
+            let y = targetArea.origin.y + targetArea.height - padding - cellHeight - CGFloat(row) * (cellHeight + padding)
+
+            rects.append(CGRect(x: x, y: y, width: cellWidth, height: cellHeight))
+        }
+
+        return rects
     }
 }
