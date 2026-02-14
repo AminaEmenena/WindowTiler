@@ -13,9 +13,15 @@ let package = Package(
             sources: [
                 "WindowTilerApp.swift",
                 "Models/WindowInfo.swift",
+                "Models/AppGroup.swift",
+                "Models/SavedLayout.swift",
                 "Services/AccessibilityService.swift",
                 "Services/LayoutEngine.swift",
                 "Services/WindowManager.swift",
+                "Services/SettingsService.swift",
+                "Services/LaunchAtLoginService.swift",
+                "Services/GroupStorage.swift",
+                "Services/LayoutStorage.swift",
                 "Views/MenuBarView.swift"
             ]
         )

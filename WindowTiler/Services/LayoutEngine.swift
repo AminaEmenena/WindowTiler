@@ -2,10 +2,21 @@ import Foundation
 import AppKit
 
 enum TilePosition {
-    case full       // Full screen grid
-    case left       // Left half of screen
-    case right      // Right half of screen
-    case center     // Center 60% of screen
+    case full               // Full screen grid
+    case left               // Left half of screen
+    case right              // Right half of screen
+    case center             // Center 60% of screen
+    case top                // Top half of screen
+    case bottom             // Bottom half of screen
+    case topLeft            // Top-left quarter
+    case topRight           // Top-right quarter
+    case bottomLeft         // Bottom-left quarter
+    case bottomRight        // Bottom-right quarter
+    case twoThirdsLeft      // Left 2/3 of screen
+    case oneThirdRight      // Right 1/3 of screen
+    case oneThirdLeft       // Left 1/3 of screen
+    case twoThirdsRight     // Right 2/3 of screen
+    case allDisplays        // Distribute windows across all monitors
 }
 
 struct TileLayout {
@@ -19,14 +30,62 @@ struct TileLayout {
 
 class LayoutEngine {
 
+    // MARK: - Multi-Monitor Support
+
+    /// Determine which screen a window belongs to based on its bounds.
+    /// Returns the screen that contains the largest portion of the window,
+    /// or the main screen if no screen contains the window.
+    func screenForWindowBounds(_ windowBounds: CGRect) -> NSScreen {
+        guard let mainScreen = NSScreen.main else {
+            return NSScreen.screens.first ?? NSScreen()
+        }
+
+        let screenHeight = mainScreen.frame.height
+        let screenBounds = CGRect(
+            x: windowBounds.origin.x,
+            y: screenHeight - windowBounds.origin.y - windowBounds.height,
+            width: windowBounds.width,
+            height: windowBounds.height
+        )
+
+        var bestScreen: NSScreen = mainScreen
+        var largestIntersectionArea: CGFloat = 0
+
+        for screen in NSScreen.screens {
+            let intersection = screen.frame.intersection(screenBounds)
+            if !intersection.isNull {
+                let area = intersection.width * intersection.height
+                if area > largestIntersectionArea {
+                    largestIntersectionArea = area
+                    bestScreen = screen
+                }
+            }
+        }
+
+        return bestScreen
+    }
+
+    /// Get all available screens
+    func getAllScreens() -> [NSScreen] {
+        return NSScreen.screens
+    }
+
+    /// Get the usable area for a specific screen
+    func getUsableScreenArea(for screen: NSScreen) -> CGRect {
+        return screen.visibleFrame
+    }
+
     /// Calculate the visible screen area accounting for dock and menu bar
     func getUsableScreenArea() -> CGRect {
         guard let screen = NSScreen.main else {
             return .zero
         }
-
-        // visibleFrame excludes dock and menu bar
         return screen.visibleFrame
+    }
+
+    /// Get the current padding value from settings
+    private var currentPadding: CGFloat {
+        return SettingsService.shared.windowGap
     }
 
     /// Calculate optimal grid dimensions for a given number of windows
@@ -37,7 +96,6 @@ class LayoutEngine {
             return (1, 1)
         }
 
-        // Find the most square-like grid
         let sqrt = Double(windowCount).squareRoot()
         let columns = Int(ceil(sqrt))
         let rows = Int(ceil(Double(windowCount) / Double(columns)))
@@ -46,14 +104,15 @@ class LayoutEngine {
     }
 
     /// Generate tile rectangles for the given number of windows
-    func generateTileRects(windowCount: Int, padding: CGFloat = 4) -> [CGRect] {
+    func generateTileRects(windowCount: Int, padding: CGFloat? = nil) -> [CGRect] {
         guard windowCount > 0 else { return [] }
 
+        let actualPadding = padding ?? currentPadding
         let usableArea = getUsableScreenArea()
         let (rows, columns) = calculateGrid(windowCount: windowCount)
 
-        let totalPaddingX = padding * CGFloat(columns + 1)
-        let totalPaddingY = padding * CGFloat(rows + 1)
+        let totalPaddingX = actualPadding * CGFloat(columns + 1)
+        let totalPaddingY = actualPadding * CGFloat(rows + 1)
 
         let cellWidth = (usableArea.width - totalPaddingX) / CGFloat(columns)
         let cellHeight = (usableArea.height - totalPaddingY) / CGFloat(rows)
@@ -64,10 +123,8 @@ class LayoutEngine {
             let row = i / columns
             let col = i % columns
 
-            let x = usableArea.origin.x + padding + CGFloat(col) * (cellWidth + padding)
-            // Screen coordinates in macOS have origin at bottom-left
-            // But we want to fill from top-left, so we calculate from top
-            let y = usableArea.origin.y + usableArea.height - padding - cellHeight - CGFloat(row) * (cellHeight + padding)
+            let x = usableArea.origin.x + actualPadding + CGFloat(col) * (cellWidth + actualPadding)
+            let y = usableArea.origin.y + usableArea.height - actualPadding - cellHeight - CGFloat(row) * (cellHeight + actualPadding)
 
             rects.append(CGRect(x: x, y: y, width: cellWidth, height: cellHeight))
         }
@@ -79,9 +136,17 @@ class LayoutEngine {
     func convertToWindowCoordinates(_ rect: CGRect) -> CGRect {
         guard let screen = NSScreen.main else { return rect }
 
-        // macOS screen coordinates have origin at bottom-left
-        // Window positioning uses top-left origin
         let screenHeight = screen.frame.height
+        let newY = screenHeight - rect.origin.y - rect.height
+
+        return CGRect(x: rect.origin.x, y: newY, width: rect.width, height: rect.height)
+    }
+
+    /// Convert from screen coordinates to window coordinates using a specific screen's context
+    func convertToWindowCoordinates(_ rect: CGRect, relativeTo screen: NSScreen) -> CGRect {
+        guard let mainScreen = NSScreen.main else { return rect }
+
+        let screenHeight = mainScreen.frame.height
         let newY = screenHeight - rect.origin.y - rect.height
 
         return CGRect(x: rect.origin.x, y: newY, width: rect.width, height: rect.height)
@@ -99,19 +164,15 @@ class LayoutEngine {
         var bestCols = windowCount
         var bestScore = Double.infinity
 
-        // Try different grid configurations and pick the one with best aspect ratio cells
         for rows in 1...windowCount {
             let cols = Int(ceil(Double(windowCount) / Double(rows)))
 
             let cellWidth = areaWidth / CGFloat(cols)
             let cellHeight = areaHeight / CGFloat(rows)
 
-            // We want cells that are reasonably proportioned (not too tall/thin)
-            // Ideal terminal ratio is around 1.5-2.0 (wider than tall)
             let cellRatio = cellWidth / cellHeight
             let idealRatio = 1.5
 
-            // Score: how far from ideal ratio, with penalty for very short cells
             let ratioScore = abs(cellRatio - idealRatio)
             let heightPenalty = cellHeight < 200 ? (200 - cellHeight) / 50 : 0
             let score = ratioScore + heightPenalty
@@ -126,26 +187,20 @@ class LayoutEngine {
         return (bestRows, bestCols)
     }
 
-    /// Generate tile rectangles for a specific screen position
-    func generateTileRects(windowCount: Int, position: TilePosition, padding: CGFloat = 4) -> [CGRect] {
-        guard windowCount > 0 else { return [] }
-
-        let usableArea = getUsableScreenArea()
-
-        // Calculate the target area based on position
-        let targetArea: CGRect
+    /// Calculate the target area for a given position
+    private func calculateTargetArea(for position: TilePosition, in usableArea: CGRect) -> CGRect {
         switch position {
-        case .full:
-            targetArea = usableArea
+        case .full, .allDisplays:
+            return usableArea
         case .left:
-            targetArea = CGRect(
+            return CGRect(
                 x: usableArea.origin.x,
                 y: usableArea.origin.y,
                 width: usableArea.width / 2,
                 height: usableArea.height
             )
         case .right:
-            targetArea = CGRect(
+            return CGRect(
                 x: usableArea.origin.x + usableArea.width / 2,
                 y: usableArea.origin.y,
                 width: usableArea.width / 2,
@@ -153,23 +208,105 @@ class LayoutEngine {
             )
         case .center:
             let centerWidth = usableArea.width * 0.6
-            targetArea = CGRect(
+            return CGRect(
                 x: usableArea.origin.x + (usableArea.width - centerWidth) / 2,
                 y: usableArea.origin.y,
                 width: centerWidth,
                 height: usableArea.height
             )
+        case .top:
+            return CGRect(
+                x: usableArea.origin.x,
+                y: usableArea.origin.y + usableArea.height / 2,
+                width: usableArea.width,
+                height: usableArea.height / 2
+            )
+        case .bottom:
+            return CGRect(
+                x: usableArea.origin.x,
+                y: usableArea.origin.y,
+                width: usableArea.width,
+                height: usableArea.height / 2
+            )
+        case .topLeft:
+            return CGRect(
+                x: usableArea.origin.x,
+                y: usableArea.origin.y + usableArea.height / 2,
+                width: usableArea.width / 2,
+                height: usableArea.height / 2
+            )
+        case .topRight:
+            return CGRect(
+                x: usableArea.origin.x + usableArea.width / 2,
+                y: usableArea.origin.y + usableArea.height / 2,
+                width: usableArea.width / 2,
+                height: usableArea.height / 2
+            )
+        case .bottomLeft:
+            return CGRect(
+                x: usableArea.origin.x,
+                y: usableArea.origin.y,
+                width: usableArea.width / 2,
+                height: usableArea.height / 2
+            )
+        case .bottomRight:
+            return CGRect(
+                x: usableArea.origin.x + usableArea.width / 2,
+                y: usableArea.origin.y,
+                width: usableArea.width / 2,
+                height: usableArea.height / 2
+            )
+        case .twoThirdsLeft:
+            return CGRect(
+                x: usableArea.origin.x,
+                y: usableArea.origin.y,
+                width: usableArea.width * 2 / 3,
+                height: usableArea.height
+            )
+        case .oneThirdRight:
+            return CGRect(
+                x: usableArea.origin.x + usableArea.width * 2 / 3,
+                y: usableArea.origin.y,
+                width: usableArea.width / 3,
+                height: usableArea.height
+            )
+        case .oneThirdLeft:
+            return CGRect(
+                x: usableArea.origin.x,
+                y: usableArea.origin.y,
+                width: usableArea.width / 3,
+                height: usableArea.height
+            )
+        case .twoThirdsRight:
+            return CGRect(
+                x: usableArea.origin.x + usableArea.width / 3,
+                y: usableArea.origin.y,
+                width: usableArea.width * 2 / 3,
+                height: usableArea.height
+            )
+        }
+    }
+
+    /// Generate tile rectangles for a specific screen position
+    func generateTileRects(windowCount: Int, position: TilePosition, padding: CGFloat? = nil) -> [CGRect] {
+        guard windowCount > 0 else { return [] }
+
+        if position == .allDisplays {
+            return []
         }
 
-        // Calculate optimal grid for this target area
+        let actualPadding = padding ?? currentPadding
+        let usableArea = getUsableScreenArea()
+        let targetArea = calculateTargetArea(for: position, in: usableArea)
+
         let (rows, columns) = calculateGridForArea(
             windowCount: windowCount,
             areaWidth: targetArea.width,
             areaHeight: targetArea.height
         )
 
-        let totalPaddingX = padding * CGFloat(columns + 1)
-        let totalPaddingY = padding * CGFloat(rows + 1)
+        let totalPaddingX = actualPadding * CGFloat(columns + 1)
+        let totalPaddingY = actualPadding * CGFloat(rows + 1)
 
         let cellWidth = (targetArea.width - totalPaddingX) / CGFloat(columns)
         let cellHeight = (targetArea.height - totalPaddingY) / CGFloat(rows)
@@ -180,12 +317,85 @@ class LayoutEngine {
             let row = i / columns
             let col = i % columns
 
-            let x = targetArea.origin.x + padding + CGFloat(col) * (cellWidth + padding)
-            let y = targetArea.origin.y + targetArea.height - padding - cellHeight - CGFloat(row) * (cellHeight + padding)
+            let x = targetArea.origin.x + actualPadding + CGFloat(col) * (cellWidth + actualPadding)
+            let y = targetArea.origin.y + targetArea.height - actualPadding - cellHeight - CGFloat(row) * (cellHeight + actualPadding)
 
             rects.append(CGRect(x: x, y: y, width: cellWidth, height: cellHeight))
         }
 
         return rects
+    }
+
+    /// Generate tile rectangles for a specific screen
+    func generateTileRects(windowCount: Int, position: TilePosition, screen: NSScreen, padding: CGFloat? = nil) -> [CGRect] {
+        guard windowCount > 0 else { return [] }
+
+        if position == .allDisplays {
+            return []
+        }
+
+        let actualPadding = padding ?? currentPadding
+        let usableArea = getUsableScreenArea(for: screen)
+        let targetArea = calculateTargetArea(for: position, in: usableArea)
+
+        let (rows, columns) = calculateGridForArea(
+            windowCount: windowCount,
+            areaWidth: targetArea.width,
+            areaHeight: targetArea.height
+        )
+
+        let totalPaddingX = actualPadding * CGFloat(columns + 1)
+        let totalPaddingY = actualPadding * CGFloat(rows + 1)
+
+        let cellWidth = (targetArea.width - totalPaddingX) / CGFloat(columns)
+        let cellHeight = (targetArea.height - totalPaddingY) / CGFloat(rows)
+
+        var rects: [CGRect] = []
+
+        for i in 0..<windowCount {
+            let row = i / columns
+            let col = i % columns
+
+            let x = targetArea.origin.x + actualPadding + CGFloat(col) * (cellWidth + actualPadding)
+            let y = targetArea.origin.y + targetArea.height - actualPadding - cellHeight - CGFloat(row) * (cellHeight + actualPadding)
+
+            rects.append(CGRect(x: x, y: y, width: cellWidth, height: cellHeight))
+        }
+
+        return rects
+    }
+
+    /// Generate tile rectangles distributed across all displays.
+    func generateTileRectsAcrossDisplays(windowCount: Int, padding: CGFloat? = nil) -> [(rect: CGRect, screen: NSScreen)] {
+        guard windowCount > 0 else { return [] }
+
+        let screens = getAllScreens()
+        guard !screens.isEmpty else { return [] }
+
+        let windowsPerScreen = windowCount / screens.count
+        let extraWindows = windowCount % screens.count
+
+        var results: [(rect: CGRect, screen: NSScreen)] = []
+        var windowIndex = 0
+
+        for (screenIndex, screen) in screens.enumerated() {
+            let countForThisScreen = windowsPerScreen + (screenIndex < extraWindows ? 1 : 0)
+            guard countForThisScreen > 0 else { continue }
+
+            let rects = generateTileRects(
+                windowCount: countForThisScreen,
+                position: .full,
+                screen: screen,
+                padding: padding
+            )
+
+            for rect in rects {
+                results.append((rect: rect, screen: screen))
+                windowIndex += 1
+                if windowIndex >= windowCount { break }
+            }
+        }
+
+        return results
     }
 }
